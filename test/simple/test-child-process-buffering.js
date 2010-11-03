@@ -1,4 +1,5 @@
-require("../common");
+common = require("../common");
+assert = common.assert
 
 var spawn = require('child_process').spawn;
 
@@ -10,12 +11,12 @@ function pwd (callback) {
 
   child.stdout.setEncoding('utf8');
   child.stdout.addListener("data", function (s) {
-    puts("stdout: " + JSON.stringify(s));
+    console.log("stdout: " + JSON.stringify(s));
     output += s;
   });
 
   child.addListener("exit", function (c) {
-    puts("exit: " + c);
+    console.log("exit: " + c);
     assert.equal(0, c);
     callback(output);
     pwd_called = true;
@@ -24,7 +25,7 @@ function pwd (callback) {
 
 
 pwd(function (result) {
-  p(result);
+  common.p(result);
   assert.equal(true, result.length > 1);
   assert.equal("\n", result[result.length-1]);
 });

@@ -27,6 +27,8 @@
 
 #include "v8.h"
 
+#if defined(V8_TARGET_ARCH_IA32)
+
 #include "codegen-inl.h"
 #include "register-allocator-inl.h"
 #include "scopes.h"
@@ -1032,7 +1034,7 @@ Result VirtualFrame::CallKeyedLoadIC(RelocInfo::Mode mode) {
 
 Result VirtualFrame::CallStoreIC(Handle<String> name, bool is_contextual) {
   // Value and (if not contextual) receiver are on top of the frame.
-  //  The IC expects name in ecx, value in eax, and receiver in edx.
+  // The IC expects name in ecx, value in eax, and receiver in edx.
   Handle<Code> ic(Builtins::builtin(Builtins::StoreIC_Initialize));
   Result value = Pop();
   if (is_contextual) {
@@ -1107,6 +1109,24 @@ Result VirtualFrame::CallCallIC(RelocInfo::Mode mode,
   // drops them all.
   InLoopFlag in_loop = loop_nesting > 0 ? IN_LOOP : NOT_IN_LOOP;
   Handle<Code> ic = cgen()->ComputeCallInitialize(arg_count, in_loop);
+  // Spill args, receiver, and function.  The call will drop args and
+  // receiver.
+  Result name = Pop();
+  PrepareForCall(arg_count + 1, arg_count + 1);  // Arguments + receiver.
+  name.ToRegister(ecx);
+  name.Unuse();
+  return RawCallCodeObject(ic, mode);
+}
+
+
+Result VirtualFrame::CallKeyedCallIC(RelocInfo::Mode mode,
+                                     int arg_count,
+                                     int loop_nesting) {
+  // Function name, arguments, and receiver are on top of the frame.
+  // The IC expects the name in ecx and the rest on the stack and
+  // drops them all.
+  InLoopFlag in_loop = loop_nesting > 0 ? IN_LOOP : NOT_IN_LOOP;
+  Handle<Code> ic = cgen()->ComputeKeyedCallInitialize(arg_count, in_loop);
   // Spill args, receiver, and function.  The call will drop args and
   // receiver.
   Result name = Pop();
@@ -1310,3 +1330,5 @@ void VirtualFrame::Push(Expression* expr) {
 #undef __
 
 } }  // namespace v8::internal
+
+#endif  // V8_TARGET_ARCH_IA32

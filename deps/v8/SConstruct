@@ -43,7 +43,7 @@ if ANDROID_TOP is None:
   ANDROID_TOP=""
 
 # ARM_TARGET_LIB is the path to the dynamic library to use on the target
-# machine if cross-compiling to an arm machine. You will also need to set 
+# machine if cross-compiling to an arm machine. You will also need to set
 # the additional cross-compiling environment variables to the cross compiler.
 ARM_TARGET_LIB = os.environ.get('ARM_TARGET_LIB')
 if ARM_TARGET_LIB:
@@ -58,7 +58,7 @@ else:
 # on linux we need these compiler flags to avoid crashes in the v8 test suite
 # and avoid dtoa.c strict aliasing issues
 if os.environ.get('GCC_VERSION') == '44':
-    GCC_EXTRA_CCFLAGS = ['-fno-tree-vrp', '-fno-strict-aliasing']
+    GCC_EXTRA_CCFLAGS = ['-fno-tree-vrp']
     GCC_DTOA_EXTRA_CCFLAGS = []
 else:
     GCC_EXTRA_CCFLAGS = []
@@ -80,10 +80,10 @@ ANDROID_FLAGS = ['-march=armv7-a',
                  '-frerun-cse-after-loop',
                  '-frename-registers',
                  '-fomit-frame-pointer',
-                 '-fno-strict-aliasing',
                  '-finline-limit=64',
                  '-DCAN_USE_VFP_INSTRUCTIONS=1',
                  '-DCAN_USE_ARMV7_INSTRUCTIONS=1',
+                 '-DCAN_USE_UNALIGNED_ACCESSES=1',
                  '-MD']
 
 ANDROID_INCLUDES = [ANDROID_TOP + '/bionic/libc/arch-arm/include',
@@ -178,6 +178,9 @@ LIBRARY_FLAGS = {
       'CCFLAGS':      ['-ansi'],
     },
     'os:solaris': {
+      # On Solaris, to get isinf, INFINITY, fpclassify and other macros one
+      # needs to define __C99FEATURES__.
+      'CPPDEFINES': ['__C99FEATURES__'],
       'CPPPATH' : ['/usr/local/include'],
       'LIBPATH' : ['/usr/local/lib'],
       'CCFLAGS':      ['-ansi'],
@@ -200,17 +203,17 @@ LIBRARY_FLAGS = {
       'LINKFLAGS':    ['-m32']
     },
     'arch:arm': {
-      'CPPDEFINES':   ['V8_TARGET_ARCH_ARM']
+      'CPPDEFINES':   ['V8_TARGET_ARCH_ARM'],
+      'unalignedaccesses:on' : {
+        'CPPDEFINES' : ['CAN_USE_UNALIGNED_ACCESSES=1']
+      },
+      'unalignedaccesses:off' : {
+        'CPPDEFINES' : ['CAN_USE_UNALIGNED_ACCESSES=0']
+      }
     },
     'simulator:arm': {
       'CCFLAGS':      ['-m32'],
       'LINKFLAGS':    ['-m32']
-    },
-    'armvariant:thumb2': {
-      'CPPDEFINES':   ['V8_ARM_VARIANT_THUMB']
-    },
-    'armvariant:arm': {
-      'CPPDEFINES':   ['V8_ARM_VARIANT_ARM']
     },
     'arch:mips': {
       'CPPDEFINES':   ['V8_TARGET_ARCH_MIPS'],
@@ -624,6 +627,9 @@ D8_FLAGS = {
     'os:win32': {
       'LIBS': ['winmm', 'ws2_32'],
     },
+    'arch:arm': {
+      'LINKFLAGS':   ARM_LINK_FLAGS
+    },
   },
   'msvc': {
     'all': {
@@ -666,7 +672,7 @@ SIMPLE_OPTIONS = {
     'help': 'the toolchain to use (' + TOOLCHAIN_GUESS + ')'
   },
   'os': {
-    'values': ['freebsd', 'linux', 'macos', 'win32', 'android', 'openbsd', 'solaris'],
+    'values': ['freebsd', 'linux', 'macos', 'win32', 'android', 'openbsd', 'solaris', 'cygwin'],
     'default': OS_GUESS,
     'help': 'the os to build for (' + OS_GUESS + ')'
   },
@@ -735,6 +741,11 @@ SIMPLE_OPTIONS = {
     'default': 'none',
     'help': 'build with simulator'
   },
+  'unalignedaccesses': {
+    'values': ['default', 'on', 'off'],
+    'default': 'default',
+    'help': 'set whether the ARM target supports unaligned accesses'
+  },
   'disassembler': {
     'values': ['on', 'off'],
     'default': 'off',
@@ -760,11 +771,6 @@ SIMPLE_OPTIONS = {
     'default': 'hidden',
     'help': 'shared library symbol visibility'
   },
-  'armvariant': {
-    'values': ['arm', 'thumb2', 'none'],
-    'default': 'none',
-    'help': 'generate thumb2 instructions instead of arm instructions (default)'
-  },
   'pgo': {
     'values': ['off', 'instrument', 'optimize'],
     'default': 'off',
@@ -777,6 +783,7 @@ def GetOptions():
   result = Options()
   result.Add('mode', 'compilation mode (debug, release)', 'release')
   result.Add('sample', 'build sample (shell, process, lineprocessor)', '')
+  result.Add('cache', 'directory to use for scons build cache', '')
   result.Add('env', 'override environment settings (NAME0:value0,NAME1:value1,...)', '')
   result.Add('importenv', 'import environment settings (NAME0,NAME1,...)', '')
   for (name, option) in SIMPLE_OPTIONS.iteritems():
@@ -858,6 +865,12 @@ def VerifyOptions(env):
     Abort("Shared Object soname not applicable for static library.")
   if env['os'] != 'win32' and env['pgo'] != 'off':
     Abort("Profile guided optimization only supported on Windows.")
+  if env['cache'] and not os.path.isdir(env['cache']):
+    Abort("The specified cache directory does not exist.")
+  if not (env['arch'] == 'arm' or env['simulator'] == 'arm') and ('unalignedaccesses' in ARGUMENTS):
+    print env['arch']
+    print env['simulator']
+    Abort("Option unalignedaccesses only supported for the ARM architecture.")
   for (name, option) in SIMPLE_OPTIONS.iteritems():
     if (not option.get('default')) and (name not in ARGUMENTS):
       message = ("A value for option %s must be specified (%s)." %
@@ -958,10 +971,6 @@ def PostprocessOptions(options, os):
     if 'msvcltcg' in ARGUMENTS:
       print "Warning: forcing msvcltcg on as it is required for pgo (%s)" % options['pgo']
     options['msvcltcg'] = 'on'
-  if (options['armvariant'] == 'none' and options['arch'] == 'arm'):
-    options['armvariant'] = 'arm'
-  if (options['armvariant'] != 'none' and options['arch'] != 'arm'):
-    options['armvariant'] = 'none'
   if options['arch'] == 'mips':
     if ('regexp' in ARGUMENTS) and options['regexp'] == 'native':
       # Print a warning if native regexp is specified for mips
@@ -1126,6 +1135,8 @@ def Build():
   else:
     env.Default('library')
 
+  if env['cache']:
+    CacheDir(env['cache'])
 
 # We disable deprecation warnings because we need to be able to use
 # env.Copy without getting warnings for compatibility with older

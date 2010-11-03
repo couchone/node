@@ -79,6 +79,16 @@ var next_response_seq = 0;
 var next_break_point_number = 1;
 var break_points = [];
 var script_break_points = [];
+var debugger_flags = {
+  breakPointsActive: {
+    value: true,
+    getValue: function() { return this.value; },
+    setValue: function(value) {
+      this.value = !!value;
+      %SetDisableBreak(!this.value);
+    }
+  }
+};
 
 
 // Create a new break point object and add it to the list of break points.
@@ -121,12 +131,6 @@ BreakPoint.prototype.func = function() {
 
 BreakPoint.prototype.source_position = function() {
   return this.source_position_;
-};
-
-
-BreakPoint.prototype.updateSourcePosition = function(new_position, script) {
-  this.source_position_ = new_position;
-  // TODO(635): also update line and column.
 };
 
 
@@ -242,6 +246,22 @@ function ScriptBreakPoint(type, script_id_or_name, opt_line, opt_column,
   this.active_ = true;
   this.condition_ = null;
   this.ignoreCount_ = 0;
+  this.break_points_ = [];
+}
+
+
+//Creates a clone of script breakpoint that is linked to another script.
+ScriptBreakPoint.prototype.cloneForOtherScript = function (other_script) {
+  var copy = new ScriptBreakPoint(Debug.ScriptBreakPointType.ScriptId,
+      other_script.id, this.line_, this.column_, this.groupId_);
+  copy.number_ = next_break_point_number++;
+  script_break_points.push(copy);
+
+  copy.hit_count_ = this.hit_count_;
+  copy.active_ = this.active_;
+  copy.condition_ = this.condition_;
+  copy.ignoreCount_ = this.ignoreCount_;
+  return copy;
 }
 
 
@@ -278,6 +298,21 @@ ScriptBreakPoint.prototype.line = function() {
 ScriptBreakPoint.prototype.column = function() {
   return this.column_;
 };
+
+
+ScriptBreakPoint.prototype.actual_locations = function() {
+  var locations = [];
+  for (var i = 0; i < this.break_points_.length; i++) {
+    locations.push(this.break_points_[i].actual_location);
+  }
+  return locations;
+}
+
+
+ScriptBreakPoint.prototype.update_positions = function(line, column) {
+  this.line_ = line;
+  this.column_ = column;
+}
 
 
 ScriptBreakPoint.prototype.hit_count = function() {
@@ -319,10 +354,8 @@ ScriptBreakPoint.prototype.setIgnoreCount = function(ignoreCount) {
   this.ignoreCount_ = ignoreCount;
 
   // Set ignore count on all break points created from this script break point.
-  for (var i = 0; i < break_points.length; i++) {
-    if (break_points[i].script_break_point() === this) {
-      break_points[i].setIgnoreCount(ignoreCount);
-    }
+  for (var i = 0; i < this.break_points_.length; i++) {
+    this.break_points_[i].setIgnoreCount(ignoreCount);
   }
 };
 
@@ -364,17 +397,23 @@ ScriptBreakPoint.prototype.set = function (script) {
   }
 
   // Convert the line and column into an absolute position within the script.
-  var pos = Debug.findScriptSourcePosition(script, this.line(), column);
+  var position = Debug.findScriptSourcePosition(script, this.line(), column);
 
   // If the position is not found in the script (the script might be shorter
   // than it used to be) just ignore it.
-  if (pos === null) return;
+  if (position === null) return;
 
   // Create a break point object and set the break point.
-  break_point = MakeBreakPoint(pos, this.line(), this.column(), this);
+  break_point = MakeBreakPoint(position, this.line(), this.column(), this);
   break_point.setIgnoreCount(this.ignoreCount());
-  %SetScriptBreakPoint(script, pos, break_point);
-
+  var actual_position = %SetScriptBreakPoint(script, position, break_point);
+  if (IS_UNDEFINED(actual_position)) {
+    actual_position = position;
+  }
+  var actual_location = script.locationFromPosition(actual_position, true);
+  break_point.actual_location = { line: actual_location.line,
+                                  column: actual_location.column };
+  this.break_points_.push(break_point);
   return break_point;
 };
 
@@ -391,6 +430,7 @@ ScriptBreakPoint.prototype.clear = function () {
     }
   }
   break_points = remaining_break_points;
+  this.break_points_ = [];
 };
 
 
@@ -403,6 +443,17 @@ function UpdateScriptBreakPoints(script) {
       script_break_points[i].set(script);
     }
   }
+}
+
+
+function GetScriptBreakPoints(script) {
+  var result = [];
+  for (var i = 0; i < script_break_points.length; i++) {
+    if (script_break_points[i].matchesScript(script)) {
+      result.push(script_break_points[i]);
+    }
+  }
+  return result;
 }
 
 
@@ -525,6 +576,19 @@ Debug.findBreakPoint = function(break_point_number, remove) {
   }
 };
 
+Debug.findBreakPointActualLocations = function(break_point_number) {
+  for (var i = 0; i < script_break_points.length; i++) {
+    if (script_break_points[i].number() == break_point_number) {
+      return script_break_points[i].actual_locations();
+    }
+  }
+  for (var i = 0; i < break_points.length; i++) {
+    if (break_points[i].number() == break_point_number) {
+      return [break_points[i].actual_location];
+    }
+  }
+  return [];
+}
 
 Debug.setBreakPoint = function(func, opt_line, opt_column, opt_condition) {
   if (!IS_FUNCTION(func)) throw new Error('Parameters have wrong types.');
@@ -556,7 +620,12 @@ Debug.setBreakPoint = function(func, opt_line, opt_column, opt_condition) {
   } else {
     // Set a break point directly on the function.
     var break_point = MakeBreakPoint(source_position, opt_line, opt_column);
-    %SetFunctionBreakPoint(func, source_position, break_point);
+    var actual_position =
+        %SetFunctionBreakPoint(func, source_position, break_point);
+    actual_position += this.sourcePosition(func);
+    var actual_location = script.locationFromPosition(actual_position, true);
+    break_point.actual_location = { line: actual_location.line,
+                                    column: actual_location.column };
     break_point.setCondition(opt_condition);
     return break_point.number();
   }
@@ -754,7 +823,13 @@ Debug.showBreakPoints = function(f, full) {
 Debug.scripts = function() {
   // Collect all scripts in the heap.
   return %DebugGetLoadedScripts();
-}
+};
+
+
+Debug.debuggerFlags = function() {
+  return debugger_flags;
+};
+
 
 function MakeExecutionState(break_id) {
   return new ExecutionState(break_id);
@@ -1239,6 +1314,8 @@ DebugCommandProcessor.prototype.processDebugJSONRequest = function(json_request)
         this.clearBreakPointRequest_(request, response);
       } else if (request.command == 'clearbreakpointgroup') {
         this.clearBreakPointGroupRequest_(request, response);
+      } else if (request.command == 'listbreakpoints') {
+        this.listBreakpointsRequest_(request, response);
       } else if (request.command == 'backtrace') {
         this.backtraceRequest_(request, response);
       } else if (request.command == 'frame') {
@@ -1264,9 +1341,11 @@ DebugCommandProcessor.prototype.processDebugJSONRequest = function(json_request)
       } else if (request.command == 'version') {
         this.versionRequest_(request, response);
       } else if (request.command == 'profile') {
-          this.profileRequest_(request, response);
+        this.profileRequest_(request, response);
       } else if (request.command == 'changelive') {
-          this.changeLiveRequest_(request, response);
+        this.changeLiveRequest_(request, response);
+      } else if (request.command == 'flags') {
+        this.debuggerFlagsRequest_(request, response);
       } else {
         throw new Error('Unknown command "' + request.command + '" in request');
       }
@@ -1451,8 +1530,10 @@ DebugCommandProcessor.prototype.setBreakPointRequest_ =
     }
     response.body.line = break_point.line();
     response.body.column = break_point.column();
+    response.body.actual_locations = break_point.actual_locations();
   } else {
     response.body.type = 'function';
+    response.body.actual_locations = [break_point.actual_location];
   }
 };
 
@@ -1552,6 +1633,37 @@ DebugCommandProcessor.prototype.clearBreakPointRequest_ = function(request, resp
 
   // Add the cleared break point number to the response.
   response.body = { breakpoint: break_point }
+}
+
+
+DebugCommandProcessor.prototype.listBreakpointsRequest_ = function(request, response) {
+  var array = [];
+  for (var i = 0; i < script_break_points.length; i++) {
+    var break_point = script_break_points[i];
+
+    var description = {
+      number: break_point.number(),
+      line: break_point.line(),
+      column: break_point.column(),
+      groupId: break_point.groupId(),
+      hit_count: break_point.hit_count(),
+      active: break_point.active(),
+      condition: break_point.condition(),
+      ignoreCount: break_point.ignoreCount(),
+      actual_locations: break_point.actual_locations()
+    }
+
+    if (break_point.type() == Debug.ScriptBreakPointType.ScriptId) {
+      description.type = 'scriptId';
+      description.script_id = break_point.script_id();
+    } else {
+      description.type = 'scriptName';
+      description.script_name = break_point.script_name();
+    }
+    array.push(description);
+  }
+
+  response.body = { breakpoints: array }
 }
 
 
@@ -1977,6 +2089,7 @@ DebugCommandProcessor.prototype.changeLiveRequest_ = function(request, response)
     return response.failed('Missing arguments');
   }
   var script_id = request.arguments.script_id;
+  var preview_only = !!request.arguments.preview_only;
   
   var scripts = %DebugGetLoadedScripts();
 
@@ -1991,43 +2104,55 @@ DebugCommandProcessor.prototype.changeLiveRequest_ = function(request, response)
     return;
   }
 
-  // A function that calls a proper signature of LiveEdit API.  
-  var invocation;
-  
   var change_log = new Array();
-  
-  if (IS_STRING(request.arguments.new_source)) {
-    var new_source = request.arguments.new_source;
-    invocation = function() {
-      return Debug.LiveEdit.SetScriptSource(the_script, new_source, change_log);
-    }
-  } else {
-    var change_pos = parseInt(request.arguments.change_pos);
-    var change_len = parseInt(request.arguments.change_len);
-    var new_string = request.arguments.new_string;
-    if (!IS_STRING(new_string)) {
-      response.failed('Argument "new_string" is not a string value');
-      return;
-    }
-    invocation = function() {
-      return Debug.LiveEdit.ApplyPatch(the_script, change_pos, change_len,
-          new_string, change_log);
-    }
+
+  if (!IS_STRING(request.arguments.new_source)) {
+    throw "new_source argument expected";
   }
 
-  try {
-    invocation();
-  } catch (e) {
-    if (e instanceof Debug.LiveEdit.Failure) {
-      // Let's treat it as a "success" so that body with change_log will be
-      // sent back. "change_log" will have "failure" field set.
-      change_log.push( { failure: true, message: e.toString() } ); 
-    } else {
-      throw e;
+  var new_source = request.arguments.new_source;
+  
+  var result_description = Debug.LiveEdit.SetScriptSource(the_script,
+      new_source, preview_only, change_log);
+  response.body = {change_log: change_log, result: result_description};
+  
+  if (!preview_only && !this.running_ && result_description.stack_modified) {
+    response.body.stepin_recommended = true;
+  }
+};
+
+
+DebugCommandProcessor.prototype.debuggerFlagsRequest_ = function(request,
+                                                                 response) {
+  // Check for legal request.
+  if (!request.arguments) {
+    response.failed('Missing arguments');
+    return;
+  }
+
+  // Pull out arguments.
+  var flags = request.arguments.flags;
+
+  response.body = { flags: [] };
+  if (!IS_UNDEFINED(flags)) {
+    for (var i = 0; i < flags.length; i++) {
+      var name = flags[i].name;
+      var debugger_flag = debugger_flags[name];
+      if (!debugger_flag) {
+        continue;
+      }
+      if ('value' in flags[i]) {
+        debugger_flag.setValue(flags[i].value);
+      }
+      response.body.flags.push({ name: name, value: debugger_flag.getValue() });
+    }
+  } else {
+    for (var name in debugger_flags) {
+      var value = debugger_flags[name].getValue();
+      response.body.flags.push({ name: name, value: value });
     }
   }
-  response.body = {change_log: change_log};
-};
+}
 
 
 // Check whether the previously processed command caused the VM to become

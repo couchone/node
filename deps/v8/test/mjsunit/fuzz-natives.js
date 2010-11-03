@@ -63,7 +63,7 @@ function testArgumentCount(name, argc) {
     try {
       func = makeFunction(name, i);
     } catch (e) {
-      if (e != "SyntaxError: illegal access") throw e;
+      if (e != "SyntaxError: Illegal access") throw e;
     }
     if (func === null && i == argc) {
       throw "unexpected exception";
@@ -160,6 +160,8 @@ var knownProblems = {
   // That can only be invoked on Array.prototype.
   "FinishArrayPrototypeSetup": true,
 
+  "_SwapElements": true,
+
   // Performance critical function which cannot afford type checks.
   "_CallFunction": true,
 
@@ -173,14 +175,8 @@ var knownProblems = {
   // argument to be a compile time smi).
   "_GetFromCache": true,
 
-  // LiveEdit feature is under development currently and has fragile input.
-  "LiveEditFindSharedFunctionInfosForScript": true,
-  "LiveEditGatherCompileInfo": true,
-  "LiveEditReplaceScript": true,
-  "LiveEditReplaceFunctionCode": true,
-  "LiveEditRelinkFunctionToScript": true,
-  "LiveEditPatchFunctionPositions": true,
-  "LiveEditCheckStackActivations": true
+  // This function expects its first argument to be a non-smi.
+  "_IsStringWrapperSafeForDefaultValueOf" : true
 };
 
 var currentlyUncallable = {

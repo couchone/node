@@ -539,6 +539,9 @@ void JSObject::JSObjectVerify() {
              (map()->inobject_properties() + properties()->length() -
               map()->NextFreePropertyIndex()));
   }
+  ASSERT(map()->has_fast_elements() ==
+         (elements()->map() == Heap::fixed_array_map()));
+  ASSERT(map()->has_fast_elements() == HasFastElements());
 }
 
 
@@ -552,12 +555,14 @@ static const char* TypeToString(InstanceType type) {
     case CONS_SYMBOL_TYPE: return "CONS_SYMBOL";
     case CONS_ASCII_SYMBOL_TYPE: return "CONS_ASCII_SYMBOL";
     case EXTERNAL_ASCII_SYMBOL_TYPE:
+    case EXTERNAL_SYMBOL_WITH_ASCII_DATA_TYPE:
     case EXTERNAL_SYMBOL_TYPE: return "EXTERNAL_SYMBOL";
     case ASCII_STRING_TYPE: return "ASCII_STRING";
     case STRING_TYPE: return "TWO_BYTE_STRING";
     case CONS_STRING_TYPE:
     case CONS_ASCII_STRING_TYPE: return "CONS_STRING";
     case EXTERNAL_ASCII_STRING_TYPE:
+    case EXTERNAL_STRING_WITH_ASCII_DATA_TYPE:
     case EXTERNAL_STRING_TYPE: return "EXTERNAL_STRING";
     case FIXED_ARRAY_TYPE: return "FIXED_ARRAY";
     case BYTE_ARRAY_TYPE: return "BYTE_ARRAY";
@@ -784,6 +789,7 @@ void SharedFunctionInfo::SharedFunctionInfoVerify() {
   CHECK(IsSharedFunctionInfo());
   VerifyObjectField(kNameOffset);
   VerifyObjectField(kCodeOffset);
+  VerifyObjectField(kScopeInfoOffset);
   VerifyObjectField(kInstanceClassNameOffset);
   VerifyObjectField(kFunctionDataOffset);
   VerifyObjectField(kScriptOffset);
@@ -806,7 +812,8 @@ void JSGlobalProxy::JSGlobalProxyVerify() {
   VerifyObjectField(JSGlobalProxy::kContextOffset);
   // Make sure that this object has no properties, elements.
   CHECK_EQ(0, properties()->length());
-  CHECK_EQ(0, elements()->length());
+  CHECK(HasFastElements());
+  CHECK_EQ(0, FixedArray::cast(elements())->length());
 }
 
 
@@ -1325,6 +1332,32 @@ bool DescriptorArray::IsSortedNoDuplicates() {
     current = hash;
   }
   return true;
+}
+
+
+void JSFunctionResultCache::JSFunctionResultCacheVerify() {
+  JSFunction::cast(get(kFactoryIndex))->Verify();
+
+  int size = Smi::cast(get(kCacheSizeIndex))->value();
+  ASSERT(kEntriesIndex <= size);
+  ASSERT(size <= length());
+  ASSERT_EQ(0, size % kEntrySize);
+
+  int finger = Smi::cast(get(kFingerIndex))->value();
+  ASSERT(kEntriesIndex <= finger);
+  ASSERT(finger < size || finger == kEntriesIndex);
+  ASSERT_EQ(0, finger % kEntrySize);
+
+  if (FLAG_enable_slow_asserts) {
+    for (int i = kEntriesIndex; i < size; i++) {
+      ASSERT(!get(i)->IsTheHole());
+      get(i)->Verify();
+    }
+    for (int i = size; i < length(); i++) {
+      ASSERT(get(i)->IsTheHole());
+      get(i)->Verify();
+    }
+  }
 }
 
 

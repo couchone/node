@@ -1,4 +1,5 @@
-require('../common');
+common = require("../common");
+assert = common.assert
 var sys = require("sys"),
 fs = require("fs"),
 http = require("http"),
@@ -12,7 +13,7 @@ var chargen = http.createServer(function (req, res) {
   assert.ok(len > 0);
   res.writeHead(200, {"transfer-encoding":"chunked"});
   for (var i=0; i<len; i++) {
-    if (i % 1000 == 0) print(',');
+    if (i % 1000 == 0) common.print(',');
     res.write(chunk);
   }
   res.end();
@@ -30,7 +31,7 @@ var proxy = http.createServer(function (req, res) {
 
 
   c.addListener('error', function (e) {
-    puts('proxy client error. sent ' + sent);
+    console.log('proxy client error. sent ' + sent);
     throw e;
   });
 
@@ -41,7 +42,7 @@ var proxy = http.createServer(function (req, res) {
     var count = 0;
 
     proxy_res.addListener('data', function(d) {
-      if (count++ % 1000 == 0) print('.');
+      if (count++ % 1000 == 0) common.print('.');
       res.write(d);
       sent += d.length;
       assert.ok(sent <= (len*chunk.length));
@@ -63,7 +64,7 @@ function call_chargen(list) {
   if (list.length > 0) {
     var len = list.shift();
 
-    sys.debug("calling chargen for " + len + " chunks.");
+    common.debug("calling chargen for " + len + " chunks.");
 
     var recved = 0;
 
@@ -78,7 +79,7 @@ function call_chargen(list) {
 
       res.addListener('end', function() {
         assert.ok(recved <= (len*chunk.length));
-        sys.debug("end for " + len + " chunks.");
+        common.debug("end for " + len + " chunks.");
         call_chargen(list);
       });
 
@@ -86,7 +87,7 @@ function call_chargen(list) {
     req.end();
 
   } else {
-    sys.puts("End of list. closing servers");
+    console.log("End of list. closing servers");
     proxy.close();
     chargen.close();
     done = true;

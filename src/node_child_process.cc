@@ -9,11 +9,16 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/types.h>
-#ifdef __FreeBSD__
+#if defined(__FreeBSD__ ) || defined(__OpenBSD__)
 #include <sys/wait.h>
 #endif
 
+# ifdef __APPLE__
+# include <crt_externs.h>
+# define environ (*_NSGetEnviron())
+# else
 extern char **environ;
+# endif
 
 namespace node {
 
@@ -30,6 +35,17 @@ static inline int SetNonBlocking(int fd) {
   if (r != 0) {
     perror("SetNonBlocking()");
   }
+  return r;
+}
+
+
+static inline int ResetFlags(int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  // blocking
+  int r = fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+  flags = fcntl(fd, F_GETFD, 0);
+  // unset the CLOEXEC
+  fcntl(fd, F_SETFD, flags & ~FD_CLOEXEC);
   return r;
 }
 
@@ -64,10 +80,11 @@ Handle<Value> ChildProcess::New(const Arguments& args) {
 Handle<Value> ChildProcess::Spawn(const Arguments& args) {
   HandleScope scope;
 
-  if (args.Length() != 3 ||
+  if (args.Length() < 3 ||
       !args[0]->IsString() ||
       !args[1]->IsArray() ||
-      !args[2]->IsArray()) {
+      !args[2]->IsString() ||
+      !args[3]->IsArray()) {
     return ThrowException(Exception::Error(String::New("Bad argument.")));
   }
 
@@ -91,8 +108,12 @@ Handle<Value> ChildProcess::Spawn(const Arguments& args) {
     argv[i+1] = strdup(*arg);
   }
 
-  // Copy third argument, args[2], into a c-string array called env.
-  Local<Array> env_handle = Local<Array>::Cast(args[2]);
+  // Copy third argument, args[2], into a c-string called cwd.
+  String::Utf8Value arg(args[2]->ToString());
+  char *cwd = strdup(*arg);
+
+  // Copy fourth argument, args[3], into a c-string array called env.
+  Local<Array> env_handle = Local<Array>::Cast(args[3]);
   int envc = env_handle->Length();
   char **env = new char*[envc+1]; // heap allocated to detect errors
   env[envc] = NULL;
@@ -101,9 +122,21 @@ Handle<Value> ChildProcess::Spawn(const Arguments& args) {
     env[i] = strdup(*pair);
   }
 
+  int custom_fds[3] = { -1, -1, -1 };
+  if (args[4]->IsArray()) {
+    // Set the custom file descriptor values (if any) for the child process
+    Local<Array> custom_fds_handle = Local<Array>::Cast(args[4]);
+    int custom_fds_len = custom_fds_handle->Length();
+    for (int i = 0; i < custom_fds_len; i++) {
+      if (custom_fds_handle->Get(i)->IsUndefined()) continue;
+      Local<Integer> fd = custom_fds_handle->Get(i)->ToInteger();
+      custom_fds[i] = fd->Value();
+    }
+  }
+
   int fds[3];
 
-  int r = child->Spawn(argv[0], argv, env, fds);
+  int r = child->Spawn(argv[0], argv, cwd, env, fds, custom_fds);
 
   for (i = 0; i < argv_length; i++) free(argv[i]);
   delete [] argv;
@@ -144,7 +177,7 @@ Handle<Value> ChildProcess::Kill(const Arguments& args) {
       sig = args[0]->Int32Value();
     } else if (args[0]->IsString()) {
       Local<String> signame = args[0]->ToString();
-      Local<Object> process = Context::GetCurrent()->Global();
+      Local<Object> process = v8::Context::GetCurrent()->Global();
       Local<Object> node_obj = process->Get(String::NewSymbol("process"))->ToObject();
 
       Local<Value> sig_v = node_obj->Get(signame);
@@ -180,8 +213,10 @@ void ChildProcess::Stop() {
 //
 int ChildProcess::Spawn(const char *file,
                         char *const args[],
+                        const char *cwd,
                         char **env,
-                        int stdio_fds[3]) {
+                        int stdio_fds[3],
+                        int custom_fds[3]) {
   HandleScope scope;
   assert(pid_ == -1);
   assert(!ev_is_active(&child_watcher_));
@@ -189,9 +224,9 @@ int ChildProcess::Spawn(const char *file,
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
 
   /* An implementation of popen(), basically */
-  if (pipe(stdin_pipe) < 0 ||
-      pipe(stdout_pipe) < 0 ||
-      pipe(stderr_pipe) < 0) {
+  if (custom_fds[0] == -1 && pipe(stdin_pipe) < 0 ||
+      custom_fds[1] == -1 && pipe(stdout_pipe) < 0 ||
+      custom_fds[2] == -1 && pipe(stderr_pipe) < 0) {
     perror("pipe()");
     return -1;
   }
@@ -206,14 +241,34 @@ int ChildProcess::Spawn(const char *file,
       return -4;
 
     case 0:  // Child.
-      close(stdin_pipe[1]);  // close write end
-      dup2(stdin_pipe[0],  STDIN_FILENO);
+      if (custom_fds[0] == -1) {
+        close(stdin_pipe[1]);  // close write end
+        dup2(stdin_pipe[0],  STDIN_FILENO);
+      } else {
+        ResetFlags(custom_fds[0]);
+        dup2(custom_fds[0], STDIN_FILENO);
+      }
 
-      close(stdout_pipe[0]);  // close read end
-      dup2(stdout_pipe[1], STDOUT_FILENO);
+      if (custom_fds[1] == -1) {
+        close(stdout_pipe[0]);  // close read end
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+      } else {
+        ResetFlags(custom_fds[1]);
+        dup2(custom_fds[1], STDOUT_FILENO);
+      }
 
-      close(stderr_pipe[0]);  // close read end
-      dup2(stderr_pipe[1], STDERR_FILENO);
+      if (custom_fds[2] == -1) {
+        close(stderr_pipe[0]);  // close read end
+        dup2(stderr_pipe[1], STDERR_FILENO);
+      } else {
+        ResetFlags(custom_fds[2]);
+        dup2(custom_fds[2], STDERR_FILENO);
+      }
+
+      if (strlen(cwd) && chdir(cwd)) {
+        perror("chdir()");
+        _exit(127);
+      }
 
       environ = env;
 
@@ -232,17 +287,29 @@ int ChildProcess::Spawn(const char *file,
   Ref();
   handle_->Set(pid_symbol, Integer::New(pid_));
 
-  close(stdin_pipe[0]);
-  stdio_fds[0] = stdin_pipe[1];
-  SetNonBlocking(stdin_pipe[1]);
+  if (custom_fds[0] == -1) {
+    close(stdin_pipe[0]);
+    stdio_fds[0] = stdin_pipe[1];
+    SetNonBlocking(stdin_pipe[1]);
+  } else {
+    stdio_fds[0] = custom_fds[0];
+  }
 
-  close(stdout_pipe[1]);
-  stdio_fds[1] = stdout_pipe[0];
-  SetNonBlocking(stdout_pipe[0]);
+  if (custom_fds[1] == -1) {
+    close(stdout_pipe[1]);
+    stdio_fds[1] = stdout_pipe[0];
+    SetNonBlocking(stdout_pipe[0]);
+  } else {
+    stdio_fds[1] = custom_fds[1];
+  }
 
-  close(stderr_pipe[1]);
-  stdio_fds[2] = stderr_pipe[0];
-  SetNonBlocking(stderr_pipe[0]);
+  if (custom_fds[2] == -1) {
+    close(stderr_pipe[1]);
+    stdio_fds[2] = stderr_pipe[0];
+    SetNonBlocking(stderr_pipe[0]);
+  } else {
+    stdio_fds[2] = custom_fds[2];
+  }
 
   return 0;
 }
@@ -289,3 +356,5 @@ int ChildProcess::Kill(int sig) {
 }
 
 }  // namespace node
+
+NODE_MODULE(node_child_process, node::ChildProcess::Initialize);

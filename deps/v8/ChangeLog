@@ -1,13 +1,343 @@
-2010-04-28: Version 2.2.6
+2010-08-16: Version 2.3.8
 
-        Add "amd64" as recognized architecture in scons build script
-        (by Ryan Dahl <coldredlemur@gmail.com>).
+        Fixed build with strict aliasing on GCC 4.4 (issue 463).
 
-        Fix bug in String search and replace with very simple RegExps.
+        Fixed issue with incorrect handling of custom valueOf methods on
+        string wrappers (issue 760).
 
-        Fix bug in RegExp containing "\b^".
+        Fixed compilation for ARMv4 (issue 590).
+
+        Improved performance.
+
+
+2010-08-11: Version 2.3.7
+
+        Reduced size of heap snapshots produced by heap profiler (issue 783).
+
+        Introduced v8::Value::IsRegExp method.
+
+        Fixed CPU profiler crash in start / stop sequence when non-existent
+        name is passed (issue http://crbug.com/51594).
+
+        Introduced new indexed property query callbacks API (issue 816). This
+        API is guarded by USE_NEW_QUERY_CALLBACK define and is disabled
+        by default.
+
+        Removed support for object literal get/set with number/string
+        property name.
+
+        Fixed handling of JSObject::elements in CalculateNetworkSize
+        (issue 822).
+
+        Allow compiling with strict aliasing enabled on GCC 4.4 (issue 463).
+
+
+2010-08-09: Version 2.3.6
+
+        RegExp literals create a new object every time they are evaluated
+        (issue 704).
+
+        Object.seal and Object.freeze return the modified object (issue 809).
+
+        Fix building using GCC 4.4.4.
+
+
+2010-08-04: Version 2.3.5
+
+        Added support for ES5 property names. Object initialisers and
+        dot-notation property access now allows keywords. Also allowed
+        non-identifiers after "get" or "set" in an object initialiser.
+
+        Randomize the addresses of allocated executable memory on Windows.
+
+
+2010-08-02: Version 2.3.4
+
+        Fixed problems in implementation of ES5 function.prototype.bind.
+
+        Fixed error when using apply with arguments object on ARM (issue 784).
+
+        Added setting of global flags to debugger protocol.
+
+        Fixed an error affecting cached results of sin and cos (issue 792).
+
+        Removed memory leak from a boundary case where V8 is not initialized.
+
+        Fixed issue where debugger could set breakpoints outside the body
+        of a function.
+
+        Fixed issue in debugger when using both live edit and step in features.
+
+        Added Number-letter (Nl) category to Unicode tables.  These characters
+        can now be used in identifiers.
+
+        Fixed an assert failure on X64 (issue 806).
 
         Performance improvements on all platforms.
+
+
+2010-07-26: Version 2.3.3
+
+        Fixed error when building the d8 shell in a fresh checkout.
+
+        Implemented Function.prototype.bind (ES5 15.3.4.5).
+
+        Fixed an error in inlined stores on ia32.
+
+        Fixed an error when setting a breakpoint at the end of a function
+        that does not end with a newline character.
+
+        Performance improvements on all platforms.
+
+
+2010-07-21: Version 2.3.2
+
+        Fixed compiler warnings when building with LLVM.
+
+        Fixed a bug with for-in applied to strings (issue 785).
+
+        Performance improvements on all platforms.
+
+
+2010-07-19: Version 2.3.1
+
+        Fixed compilation and linking with V8_INTERPRETED_REGEXP flag.
+
+        Fixed bug related to code flushing while compiling a lazy
+        compilable function (issue http://crbug.com/49099).
+
+        Performance improvements on all platforms.
+
+
+2010-07-15: Version 2.3.0
+
+        Added ES5 Object.seal and Object.isSealed.
+
+        Added debugger API for scheduling debugger commands from a
+        separate thread.
+
+
+2010-07-14: Version 2.2.24
+
+        Added API for capturing stack traces for uncaught exceptions.
+
+        Fixed crash bug when preparsing from a non-external V8 string
+        (issue 775).
+
+        Fixed JSON.parse bug causing input not to be converted to string
+        (issue 764).
+
+        Added ES5 Object.freeze and Object.isFrozen.
+
+        Performance improvements on all platforms.
+
+
+2010-07-07: Version 2.2.23
+
+        API change: Convert Unicode code points outside the basic multilingual
+        plane to the replacement character.  Previous behavior was to silently
+        truncate the value to 16 bits.
+
+        Fixed crash: handle all flat string types in regexp replace.
+
+        Prevent invalid pre-parsing data passed in through the API from
+        crashing V8.
+
+        Performance improvements on all platforms.
+
+
+2010-07-05: Version 2.2.22
+
+        Added ES5 Object.isExtensible and Object.preventExtensions.
+
+        Enabled building V8 as a DLL.
+
+        Fixed a bug in date code where -0 was not interpreted as 0
+        (issue 736).
+
+        Performance improvements on all platforms.
+
+
+2010-06-30: Version 2.2.21
+
+        Fix bug in externalizing some ASCII strings (Chromium issue 47824).
+
+        Update JSON.stringify to floor the space parameter (issue 753).
+
+        Update the Mozilla test expectations to the newest version.
+
+        Update the ES5 Conformance Test expectations to the latest version.
+
+        Update the V8 benchmark suite.
+
+        Provide actual breakpoints locations in response to setBreakpoint
+        and listBreakpoints requests.
+
+
+2010-06-28: Version 2.2.20
+
+        Fix bug with for-in on x64 platform (issue 748).
+
+        Fix crash bug on x64 platform (issue 756).
+
+        Fix bug in Object.getOwnPropertyNames. (chromium issue 41243).
+
+        Fix a bug on ARM that caused the result of 1 << x to be
+        miscalculated for some inputs.
+
+        Performance improvements on all platforms.
+
+
+2010-06-23: Version 2.2.19
+
+        Fix bug that causes the build to break when profillingsupport=off
+        (issue 738).
+
+        Added expose-externalize-string flag for testing extensions.
+
+        Resolve linker issues with using V8 as a DLL causing a number of
+        problems with unresolved symbols.
+
+        Fix build failure for cctests when ENABLE_DEBUGGER_SUPPORT is not
+        defined.
+
+        Performance improvements on all platforms.
+
+
+2010-06-16: Version 2.2.18
+
+        Added API functions to retrieve information on indexed properties
+        managed by the embedding layer.  Fixes bug 737.
+
+        Make ES5 Object.defineProperty support array elements.  Fixes bug 619.
+
+        Add heap profiling to the API.
+
+        Remove old named property query from the API.
+
+        Incremental performance improvements.
+
+
+2010-06-14: Version 2.2.17
+
+        Improved debugger support for stepping out of functions.
+
+        Incremental performance improvements.
+
+
+2010-06-09: Version 2.2.16
+
+        Removed the SetExternalStringDiposeCallback API. Changed the
+        disposal of external string resources to call a virtual Dispose
+        method on the resource.
+
+        Added support for more precise break points when debugging and
+        stepping.
+
+        Memory usage improvements on all platforms.
+
+
+2010-06-07: Version 2.2.15
+
+        Add an API to control the disposal of external string resources.
+
+        Add missing initialization of a couple of variables which makes
+        some compilers complaint when compiling with -Werror.
+
+        Improve performance on all platforms.
+
+
+2010-06-02: Version 2.2.14
+
+        Fixed a crash in code generated for String.charCodeAt.
+
+        Fixed a compilation issue with some GCC versions (issue 727).
+
+        Performance optimizations on x64 and ARM platforms.
+
+
+2010-05-31: Version 2.2.13
+
+        Implement Object.getOwnPropertyDescriptor for element indices and
+        strings (issue 599).
+
+        Fix bug for windows 64 bit C calls from generated code.
+
+        Add new scons flag unalignedaccesses for arm builds.
+
+        Performance improvements on all platforms.
+
+
+2010-05-26: Version 2.2.12
+
+        Allowed accessors to be defined on objects rather than just object
+        templates.
+
+        Changed the ScriptData API.
+
+
+2010-05-21: Version 2.2.11
+
+        Fix crash bug in liveedit on 64 bit.
+
+        Use 'full compiler' when debugging is active.  This should increase
+        the density of possible break points, making single step more fine
+        grained.  This will only take effect for functions compiled after
+        debugging has been started, so recompilation of all functions is
+        required to get the full effect.  IA32 and x64 only for now.
+
+        Misc. fixes to the Solaris build.
+
+        Add new flags --print-cumulative-gc-stat and --trace-gc-nvp.
+
+        Add filtering of CPU profiles by security context.
+
+        Fix crash bug on ARM when running without VFP2 or VFP3.
+
+        Incremental performance improvements in all backends.
+
+
+2010-05-17: Version 2.2.10
+
+        Performance improvements in the x64 and ARM backends.
+
+
+2010-05-10: Version 2.2.9
+
+        Allow Object.create to be called with a function (issue 697).
+
+        Fixed bug with Date.parse returning a non-NaN value when called on a
+        non date string (issue 696).
+
+        Allow unaligned memory accesses on ARM targets that support it (by
+        Subrato K De of CodeAurora <subratokde@codeaurora.org>).
+
+        C++ API for retrieving JavaScript stack trace information.
+
+
+2010-05-05: Version 2.2.8
+
+        Performance improvements in the x64 and ARM backends.
+
+
+2010-05-03: Version 2.2.7
+
+        Added support for ES5 date time string format to Date.parse.
+
+        Performance improvements in the x64 backend.
+
+
+2010-04-28: Version 2.2.6
+
+        Added "amd64" as recognized architecture in scons build script
+        (by Ryan Dahl <coldredlemur@gmail.com>).
+
+        Fixed bug in String search and replace with very simple RegExps.
+
+        Fixed bug in RegExp containing "\b^".
+
+        Performance improvements on all platforms.
+
 
 2010-04-26: Version 2.2.5
 

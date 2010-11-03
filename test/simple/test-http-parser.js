@@ -1,4 +1,5 @@
-require("../common");
+common = require("../common");
+assert = common.assert
 
 // The purpose of this test is not to check HTTP compliance but to test the
 // binding. Tests for pathological http messages should be submitted
@@ -14,17 +15,17 @@ var buffer = new Buffer(1024);
 
 var request = "GET /hello HTTP/1.1\r\n\r\n";
 
-buffer.asciiWrite(request, 0, request.length);
+buffer.write(request, 0, 'ascii');
 
 var callbacks = 0;
 
 parser.onMessageBegin = function () {
-  puts("message begin");
+  console.log("message begin");
   callbacks++;
 };
 
 parser.onHeadersComplete = function (info) {
-  puts("headers complete: " + JSON.stringify(info));
+  console.log("headers complete: " + JSON.stringify(info));
   assert.equal('GET', info.method);
   assert.equal(1, info.versionMajor);
   assert.equal(1, info.versionMinor);
@@ -37,9 +38,9 @@ parser.onURL = function (b, off, len) {
 };
 
 parser.onPath = function (b, off, length) {
-  puts("path [" + off + ", " + length + "]");
-  var path = b.asciiSlice(off, off+length);
-  puts("path = '" + path + "'");
+  console.log("path [" + off + ", " + length + "]");
+  var path = b.toString('ascii', off, off+length);
+  console.log("path = '" + path + "'");
   assert.equal('/hello', path);
   callbacks++;
 };

@@ -1,4 +1,5 @@
-require("../common");
+common = require("../common");
+assert = common.assert
 
 var a = require('assert');
 
@@ -9,7 +10,7 @@ function makeBlock (f) {
   };
 }
 
-assert.ok(a.AssertionError instanceof Error,
+assert.ok(common.indirectInstanceOf(a.AssertionError.prototype, Error),
           "a.AssertionError instanceof Error");
 
 assert.throws(makeBlock(a.ok, false),
@@ -154,3 +155,6 @@ try {
 }
 assert.equal(true,threw,'a.doesNotThrow is not catching type matching errors');
 
+assert.throws(function () {assert.ifError(new Error('test error'))});
+assert.doesNotThrow(function(){assert.ifError(null)});
+assert.doesNotThrow(function(){assert.ifError()});

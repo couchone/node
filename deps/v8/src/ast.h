@@ -351,10 +351,7 @@ class BreakableStatement: public Statement {
   bool is_target_for_anonymous() const { return type_ == TARGET_FOR_ANONYMOUS; }
 
  protected:
-  BreakableStatement(ZoneStringList* labels, Type type)
-      : labels_(labels), type_(type) {
-    ASSERT(labels == NULL || labels->length() > 0);
-  }
+  inline BreakableStatement(ZoneStringList* labels, Type type);
 
   explicit BreakableStatement(BreakableStatement* other);
 
@@ -367,10 +364,7 @@ class BreakableStatement: public Statement {
 
 class Block: public BreakableStatement {
  public:
-  Block(ZoneStringList* labels, int capacity, bool is_initializer_block)
-      : BreakableStatement(labels, TARGET_FOR_NAMED_ONLY),
-        statements_(capacity),
-        is_initializer_block_(is_initializer_block) { }
+  inline Block(ZoneStringList* labels, int capacity, bool is_initializer_block);
 
   // Construct a clone initialized from the original block and
   // a deep copy of all statements of the original block.
@@ -437,8 +431,7 @@ class IterationStatement: public BreakableStatement {
   BreakTarget* continue_target()  { return &continue_target_; }
 
  protected:
-  explicit IterationStatement(ZoneStringList* labels)
-      : BreakableStatement(labels, TARGET_FOR_ANONYMOUS), body_(NULL) { }
+  explicit inline IterationStatement(ZoneStringList* labels);
 
   // Construct a clone initialized from  original and
   // a deep copy of the original body.
@@ -456,9 +449,7 @@ class IterationStatement: public BreakableStatement {
 
 class DoWhileStatement: public IterationStatement {
  public:
-  explicit DoWhileStatement(ZoneStringList* labels)
-      : IterationStatement(labels), cond_(NULL), condition_position_(-1) {
-  }
+  explicit inline DoWhileStatement(ZoneStringList* labels);
 
   void Initialize(Expression* cond, Statement* body) {
     IterationStatement::Initialize(body);
@@ -482,11 +473,7 @@ class DoWhileStatement: public IterationStatement {
 
 class WhileStatement: public IterationStatement {
  public:
-  explicit WhileStatement(ZoneStringList* labels)
-      : IterationStatement(labels),
-        cond_(NULL),
-        may_have_function_literal_(true) {
-  }
+  explicit WhileStatement(ZoneStringList* labels);
 
   void Initialize(Expression* cond, Statement* body) {
     IterationStatement::Initialize(body);
@@ -511,14 +498,7 @@ class WhileStatement: public IterationStatement {
 
 class ForStatement: public IterationStatement {
  public:
-  explicit ForStatement(ZoneStringList* labels)
-      : IterationStatement(labels),
-        init_(NULL),
-        cond_(NULL),
-        next_(NULL),
-        may_have_function_literal_(true),
-        loop_variable_(NULL),
-        peel_this_loop_(false) {}
+  explicit inline ForStatement(ZoneStringList* labels);
 
   // Construct a for-statement initialized from another for-statement
   // and deep copies of all parts of the original statement.
@@ -574,8 +554,7 @@ class ForStatement: public IterationStatement {
 
 class ForInStatement: public IterationStatement {
  public:
-  explicit ForInStatement(ZoneStringList* labels)
-      : IterationStatement(labels), each_(NULL), enumerable_(NULL) { }
+  explicit inline ForInStatement(ZoneStringList* labels);
 
   void Initialize(Expression* each, Expression* enumerable, Statement* body) {
     IterationStatement::Initialize(body);
@@ -691,8 +670,7 @@ class WithExitStatement: public Statement {
 
 class CaseClause: public ZoneObject {
  public:
-  CaseClause(Expression* label, ZoneList<Statement*>* statements)
-      : label_(label), statements_(statements) { }
+  CaseClause(Expression* label, ZoneList<Statement*>* statements);
 
   bool is_default() const  { return label_ == NULL; }
   Expression* label() const  {
@@ -711,9 +689,7 @@ class CaseClause: public ZoneObject {
 
 class SwitchStatement: public BreakableStatement {
  public:
-  explicit SwitchStatement(ZoneStringList* labels)
-      : BreakableStatement(labels, TARGET_FOR_ANONYMOUS),
-        tag_(NULL), cases_(NULL) { }
+  explicit inline SwitchStatement(ZoneStringList* labels);
 
   void Initialize(Expression* tag, ZoneList<CaseClause*>* cases) {
     tag_ = tag;
@@ -1493,10 +1469,14 @@ class Conditional: public Expression {
  public:
   Conditional(Expression* condition,
               Expression* then_expression,
-              Expression* else_expression)
+              Expression* else_expression,
+              int then_expression_position,
+              int else_expression_position)
       : condition_(condition),
         then_expression_(then_expression),
-        else_expression_(else_expression) { }
+        else_expression_(else_expression),
+        then_expression_position_(then_expression_position),
+        else_expression_position_(else_expression_position) { }
 
   virtual void Accept(AstVisitor* v);
 
@@ -1506,10 +1486,15 @@ class Conditional: public Expression {
   Expression* then_expression() const { return then_expression_; }
   Expression* else_expression() const { return else_expression_; }
 
+  int then_expression_position() { return then_expression_position_; }
+  int else_expression_position() { return else_expression_position_; }
+
  private:
   Expression* condition_;
   Expression* then_expression_;
   Expression* else_expression_;
+  int then_expression_position_;
+  int else_expression_position_;
 };
 
 

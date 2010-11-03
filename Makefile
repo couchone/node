@@ -1,10 +1,7 @@
-WAF=python tools/waf-light --jobs=1
+WAF=python tools/waf-light
 
 all:
 	@$(WAF) build
-
-all-debug:
-	@$(WAF) -v build
 
 all-progress:
 	@$(WAF) -p build
@@ -16,7 +13,7 @@ uninstall:
 	@$(WAF) uninstall
 
 test: all
-	python tools/test.py --mode=release simple
+	python tools/test.py --mode=release simple message
 
 test-all: all
 	python tools/test.py --mode=debug,release
@@ -27,6 +24,9 @@ test-release: all
 test-debug: all
 	python tools/test.py --mode=debug
 
+test-message: all
+	python tools/test.py message
+
 test-simple: all
 	python tools/test.py simple
      
@@ -36,29 +36,24 @@ test-pummel: all
 test-internet: all
 	python tools/test.py internet
 
-benchmark: all
-	build/default/node benchmark/run.js
-
 # http://rtomayko.github.com/ronn
 # gem install ronn
 doc: doc/node.1 doc/api.html doc/index.html doc/changelog.html
 
 ## HACK to give the ronn-generated page a TOC
-doc/api.html: doc/api.markdown doc/api_header.html doc/api_footer.html
-	ronn -f --html doc/api.markdown \
+doc/api.html: all doc/api.markdown doc/api_header.html doc/api_footer.html
+	build/default/node tools/ronnjs/bin/ronn.js --fragment doc/api.markdown \
 	| sed "s/<h2>\(.*\)<\/h2>/<h2 id=\"\1\">\1<\/h2>/g" \
 	| cat doc/api_header.html - doc/api_footer.html > doc/api.html
 
-doc/changelog.html: ChangeLog
-	echo '<html><head><title>Node.js ChangeLog</title> <link rel="stylesheet" href="./pipe.css" type="text/css" /> <link rel="stylesheet" href="./pipe-quirks.css" type="text/css" /> <body><h1>Node.js ChangeLog</h1> <pre>' > doc/changelog.html
-	cat ChangeLog >> doc/changelog.html
-	echo '</pre></body></html>' >> doc/changelog.html
+doc/changelog.html: ChangeLog doc/changelog_header.html doc/changelog_footer.html
+	cat doc/changelog_header.html ChangeLog doc/changelog_footer.html > doc/changelog.html
 
-doc/node.1: doc/api.markdown
-	ronn --roff doc/api.markdown > doc/node.1
+doc/node.1: doc/api.markdown all
+	build/default/node tools/ronnjs/bin/ronn.js --roff doc/api.markdown > doc/node.1
 
 website-upload: doc
-	scp doc/* ryan@nodejs.org:~/tinyclouds/node/
+	scp doc/* ryan@nodejs.org:~/web/nodejs.org/
 
 docclean:
 	@-rm -f doc/node.1 doc/api.html doc/changelog.html
@@ -78,14 +73,22 @@ VERSION=$(shell git describe)
 TARNAME=node-$(VERSION)
 
 dist: doc/node.1 doc/api.html
-	git archive --prefix=$(TARNAME)/ HEAD > $(TARNAME).tar
+	git archive --format=tar --prefix=$(TARNAME)/ HEAD | tar xf -
 	mkdir -p $(TARNAME)/doc
 	cp doc/node.1 $(TARNAME)/doc/node.1
 	cp doc/api.html $(TARNAME)/doc/api.html
-	tar rf $(TARNAME).tar   \
-		$(TARNAME)/doc/node.1 \
-		$(TARNAME)/doc/api.html
-	rm -r $(TARNAME)
+	rm -rf $(TARNAME)/deps/v8/test # too big
+	tar -cf $(TARNAME).tar $(TARNAME)
+	rm -rf $(TARNAME)
 	gzip -f -9 $(TARNAME).tar
 
-.PHONY: benchmark clean docclean dist distclean check uninstall install all test test-all website-upload
+bench:
+	 benchmark/http_simple_bench.sh
+
+bench-idle:
+	./node benchmark/idle_server.js &
+	sleep 1
+	./node benchmark/idle_clients.js &
+
+
+.PHONY: bench clean docclean dist distclean check uninstall install all test test-all website-upload

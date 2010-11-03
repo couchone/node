@@ -1,4 +1,7 @@
-require("../common");
+common = require("../common");
+assert = common.assert
+
+assert = require('assert');
 
 var WINDOW = 200; // why is does this need to be so big?
 
@@ -12,7 +15,7 @@ setTimeout(function () {
 
   var diff = endtime - starttime;
   assert.ok(diff > 0);
-  puts("diff: " + diff);
+  console.log("diff: " + diff);
 
   assert.equal(true, 1000 - WINDOW < diff && diff < 1000 + WINDOW);
   setTimeout_called = true;
@@ -28,7 +31,7 @@ setInterval(function () {
 
   var diff = endtime - starttime;
   assert.ok(diff > 0);
-  puts("diff: " + diff);
+  console.log("diff: " + diff);
 
   var t = interval_count * 1000;
 
@@ -71,7 +74,14 @@ setInterval(function(param1, param2){
     clearInterval(this);
 }, 1000, "param1", "param2");
 
+// setInterval(cb, 0) should be called multiple times.
+count4 = 0;
+interval4 = setInterval(function () {
+  if (++count4 > 10) clearInterval(interval4);
+}, 0);
+
 process.addListener("exit", function () {
   assert.equal(true, setTimeout_called);
   assert.equal(3, interval_count);
+  assert.equal(11, count4);
 });

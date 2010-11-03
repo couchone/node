@@ -36,7 +36,9 @@
 #include "global-handles.h"
 #include "macro-assembler.h"
 #include "natives.h"
+#include "objects-visiting.h"
 #include "snapshot.h"
+#include "stub-cache.h"
 
 namespace v8 {
 namespace internal {
@@ -55,7 +57,7 @@ class SourceCodeCache BASE_EMBEDDED {
   }
 
   void Iterate(ObjectVisitor* v) {
-    v->VisitPointer(BitCast<Object**, FixedArray**>(&cache_));
+    v->VisitPointer(BitCast<Object**>(&cache_));
   }
 
 
@@ -228,6 +230,7 @@ class Genesis BASE_EMBEDDED {
   // Used for creating a context from scratch.
   void InstallNativeFunctions();
   bool InstallNatives();
+  void InstallCustomCallGenerators();
   void InstallJSFunctionResultCaches();
   // Used both for deserialized and from-scratch contexts to add the extensions
   // provided.
@@ -248,9 +251,13 @@ class Genesis BASE_EMBEDDED {
   void TransferNamedProperties(Handle<JSObject> from, Handle<JSObject> to);
   void TransferIndexedProperties(Handle<JSObject> from, Handle<JSObject> to);
 
+  enum PrototypePropertyMode {
+    DONT_ADD_PROTOTYPE,
+    ADD_READONLY_PROTOTYPE,
+    ADD_WRITEABLE_PROTOTYPE
+  };
   Handle<DescriptorArray> ComputeFunctionInstanceDescriptor(
-      bool make_prototype_read_only,
-      bool make_prototype_enumerable = false);
+      PrototypePropertyMode prototypeMode);
   void MakeFunctionInstancePrototypeWritable();
 
   static bool CompileBuiltin(int index);
@@ -330,7 +337,8 @@ static Handle<JSFunction> InstallFunction(Handle<JSObject> target,
                                           bool is_ecma_native) {
   Handle<String> symbol = Factory::LookupAsciiSymbol(name);
   Handle<Code> call_code = Handle<Code>(Builtins::builtin(call));
-  Handle<JSFunction> function =
+  Handle<JSFunction> function = prototype.is_null() ?
+    Factory::NewFunctionWithoutPrototype(symbol, call_code) :
     Factory::NewFunctionWithPrototype(symbol,
                                       type,
                                       instance_size,
@@ -346,23 +354,23 @@ static Handle<JSFunction> InstallFunction(Handle<JSObject> target,
 
 
 Handle<DescriptorArray> Genesis::ComputeFunctionInstanceDescriptor(
-    bool make_prototype_read_only,
-    bool make_prototype_enumerable) {
+    PrototypePropertyMode prototypeMode) {
   Handle<DescriptorArray> result = Factory::empty_descriptor_array();
 
-  // Add prototype.
-  PropertyAttributes attributes = static_cast<PropertyAttributes>(
-      (make_prototype_enumerable ? 0 : DONT_ENUM)
-      | DONT_DELETE
-      | (make_prototype_read_only ? READ_ONLY : 0));
-  result =
-      Factory::CopyAppendProxyDescriptor(
-          result,
-          Factory::prototype_symbol(),
-          Factory::NewProxy(&Accessors::FunctionPrototype),
-          attributes);
+  if (prototypeMode != DONT_ADD_PROTOTYPE) {
+    PropertyAttributes attributes = static_cast<PropertyAttributes>(
+        DONT_ENUM |
+        DONT_DELETE |
+        (prototypeMode == ADD_READONLY_PROTOTYPE ? READ_ONLY : 0));
+    result =
+        Factory::CopyAppendProxyDescriptor(
+            result,
+            Factory::prototype_symbol(),
+            Factory::NewProxy(&Accessors::FunctionPrototype),
+            attributes);
+  }
 
-  attributes =
+  PropertyAttributes attributes =
       static_cast<PropertyAttributes>(DONT_ENUM | DONT_DELETE | READ_ONLY);
   // Add length.
   result =
@@ -407,14 +415,29 @@ Handle<JSFunction> Genesis::CreateEmptyFunction() {
   // Please note that the prototype property for function instances must be
   // writable.
   Handle<DescriptorArray> function_map_descriptors =
-      ComputeFunctionInstanceDescriptor(false, false);
+      ComputeFunctionInstanceDescriptor(ADD_WRITEABLE_PROTOTYPE);
   fm->set_instance_descriptors(*function_map_descriptors);
+  fm->set_function_with_prototype(true);
+
+  // Functions with this map will not have a 'prototype' property, and
+  // can not be used as constructors.
+  Handle<Map> function_without_prototype_map =
+      Factory::NewMap(JS_FUNCTION_TYPE, JSFunction::kSize);
+  global_context()->set_function_without_prototype_map(
+      *function_without_prototype_map);
+  Handle<DescriptorArray> function_without_prototype_map_descriptors =
+      ComputeFunctionInstanceDescriptor(DONT_ADD_PROTOTYPE);
+  function_without_prototype_map->set_instance_descriptors(
+      *function_without_prototype_map_descriptors);
+  function_without_prototype_map->set_function_with_prototype(false);
 
   // Allocate the function map first and then patch the prototype later
   fm = Factory::NewMap(JS_FUNCTION_TYPE, JSFunction::kSize);
   global_context()->set_function_map(*fm);
-  function_map_descriptors = ComputeFunctionInstanceDescriptor(true);
+  function_map_descriptors =
+      ComputeFunctionInstanceDescriptor(ADD_READONLY_PROTOTYPE);
   fm->set_instance_descriptors(*function_map_descriptors);
+  fm->set_function_with_prototype(true);
 
   Handle<String> object_name = Handle<String>(Heap::Object_symbol());
 
@@ -442,12 +465,13 @@ Handle<JSFunction> Genesis::CreateEmptyFunction() {
   // 262 15.3.4.
   Handle<String> symbol = Factory::LookupAsciiSymbol("Empty");
   Handle<JSFunction> empty_function =
-      Factory::NewFunction(symbol, Factory::null_value());
+      Factory::NewFunctionWithoutPrototype(symbol);
 
   // --- E m p t y ---
   Handle<Code> code =
       Handle<Code>(Builtins::builtin(Builtins::EmptyFunction));
   empty_function->set_code(*code);
+  empty_function->shared()->set_code(*code);
   Handle<String> source = Factory::NewStringFromAscii(CStrVector("() {}"));
   Handle<Script> script = Factory::NewScript(source);
   script->set_type(Smi::FromInt(Script::TYPE_NATIVE));
@@ -457,10 +481,14 @@ Handle<JSFunction> Genesis::CreateEmptyFunction() {
   empty_function->shared()->DontAdaptArguments();
   global_context()->function_map()->set_prototype(*empty_function);
   global_context()->function_instance_map()->set_prototype(*empty_function);
+  global_context()->function_without_prototype_map()->
+      set_prototype(*empty_function);
 
   // Allocate the function map first and then patch the prototype later
-  Handle<Map> empty_fm = Factory::CopyMapDropDescriptors(fm);
-  empty_fm->set_instance_descriptors(*function_map_descriptors);
+  Handle<Map> empty_fm = Factory::CopyMapDropDescriptors(
+      function_without_prototype_map);
+  empty_fm->set_instance_descriptors(
+      *function_without_prototype_map_descriptors);
   empty_fm->set_prototype(global_context()->object_function()->prototype());
   empty_function->set_map(*empty_fm);
   return empty_function;
@@ -786,6 +814,7 @@ void Genesis::InitializeGlobal(Handle<GlobalObject> inner_global,
     initial_map->set_instance_size(
         initial_map->instance_size() + 5 * kPointerSize);
     initial_map->set_instance_descriptors(*descriptors);
+    initial_map->set_visitor_id(StaticVisitorBase::GetVisitorId(*initial_map));
   }
 
   {  // -- J S O N
@@ -1205,6 +1234,16 @@ bool Genesis::InstallNatives() {
 
   InstallNativeFunctions();
 
+  // Store the map for the string prototype after the natives has been compiled
+  // and the String function has been setup.
+  Handle<JSFunction> string_function(global_context()->string_function());
+  ASSERT(JSObject::cast(
+      string_function->initial_map()->prototype())->HasFastProperties());
+  global_context()->set_string_function_prototype_map(
+      HeapObject::cast(string_function->initial_map()->prototype())->map());
+
+  InstallCustomCallGenerators();
+
   // Install Function.prototype.call and apply.
   { Handle<String> key = Factory::function_class_symbol();
     Handle<JSFunction> function =
@@ -1215,12 +1254,12 @@ bool Genesis::InstallNatives() {
     // Install the call and the apply functions.
     Handle<JSFunction> call =
         InstallFunction(proto, "call", JS_OBJECT_TYPE, JSObject::kHeaderSize,
-                        Factory::NewJSObject(Top::object_function(), TENURED),
+                        Handle<JSObject>::null(),
                         Builtins::FunctionCall,
                         false);
     Handle<JSFunction> apply =
         InstallFunction(proto, "apply", JS_OBJECT_TYPE, JSObject::kHeaderSize,
-                        Factory::NewJSObject(Top::object_function(), TENURED),
+                        Handle<JSObject>::null(),
                         Builtins::FunctionApply,
                         false);
 
@@ -1302,6 +1341,29 @@ bool Genesis::InstallNatives() {
 }
 
 
+static void InstallCustomCallGenerator(Handle<JSFunction> holder_function,
+                                       const char* function_name,
+                                       int id) {
+  Handle<JSObject> proto(JSObject::cast(holder_function->instance_prototype()));
+  Handle<String> name = Factory::LookupAsciiSymbol(function_name);
+  Handle<JSFunction> function(JSFunction::cast(proto->GetProperty(*name)));
+  function->shared()->set_function_data(Smi::FromInt(id));
+}
+
+
+void Genesis::InstallCustomCallGenerators() {
+  HandleScope scope;
+#define INSTALL_CALL_GENERATOR(holder_fun, fun_name, name)                \
+  {                                                                       \
+    Handle<JSFunction> holder(global_context()->holder_fun##_function()); \
+    const int id = CallStubCompiler::k##name##CallGenerator;              \
+    InstallCustomCallGenerator(holder, #fun_name, id);                    \
+  }
+  CUSTOM_CALL_IC_GENERATORS(INSTALL_CALL_GENERATOR)
+#undef INSTALL_CALL_GENERATOR
+}
+
+
 // Do not forget to update macros.py with named constant
 // of cache id.
 #define JSFUNCTION_RESULT_CACHE_LIST(F) \
@@ -1311,14 +1373,12 @@ bool Genesis::InstallNatives() {
 static FixedArray* CreateCache(int size, JSFunction* factory) {
   // Caches are supposed to live for a long time, allocate in old space.
   int array_size = JSFunctionResultCache::kEntriesIndex + 2 * size;
-  Handle<FixedArray> cache =
-      Factory::NewFixedArrayWithHoles(array_size, TENURED);
+  // Cannot use cast as object is not fully initialized yet.
+  JSFunctionResultCache* cache = reinterpret_cast<JSFunctionResultCache*>(
+      *Factory::NewFixedArrayWithHoles(array_size, TENURED));
   cache->set(JSFunctionResultCache::kFactoryIndex, factory);
-  cache->set(JSFunctionResultCache::kFingerIndex,
-      Smi::FromInt(JSFunctionResultCache::kEntriesIndex));
-  cache->set(JSFunctionResultCache::kCacheSizeIndex,
-      Smi::FromInt(JSFunctionResultCache::kEntriesIndex));
-  return *cache;
+  cache->MakeZeroSize();
+  return cache;
 }
 
 
@@ -1413,6 +1473,7 @@ bool Genesis::InstallExtensions(Handle<Context> global_context,
   }
 
   if (FLAG_expose_gc) InstallExtension("v8/gc");
+  if (FLAG_expose_externalize_string) InstallExtension("v8/externalize");
 
   if (extensions == NULL) return true;
   // Install required extensions
@@ -1492,6 +1553,8 @@ bool Genesis::InstallJSBuiltins(Handle<JSBuiltinsObject> builtins) {
     Handle<SharedFunctionInfo> shared
         = Handle<SharedFunctionInfo>(function->shared());
     if (!EnsureCompiled(shared, CLEAR_EXCEPTION)) return false;
+    // Set the code object on the function object.
+    function->set_code(function->shared()->code());
     builtins->set_javascript_builtin_code(id, shared->code());
   }
   return true;
@@ -1655,9 +1718,10 @@ void Genesis::MakeFunctionInstancePrototypeWritable() {
   HandleScope scope;
 
   Handle<DescriptorArray> function_map_descriptors =
-      ComputeFunctionInstanceDescriptor(false);
+      ComputeFunctionInstanceDescriptor(ADD_WRITEABLE_PROTOTYPE);
   Handle<Map> fm = Factory::CopyMapDropDescriptors(Top::function_map());
   fm->set_instance_descriptors(*function_map_descriptors);
+  fm->set_function_with_prototype(true);
   Top::context()->global_context()->set_function_map(*fm);
 }
 
@@ -1703,8 +1767,8 @@ Genesis::Genesis(Handle<Object> global_object,
         CreateNewGlobals(global_template, global_object, &inner_global);
     HookUpGlobalProxy(inner_global, global_proxy);
     InitializeGlobal(inner_global, empty_function);
-    if (!InstallNatives()) return;
     InstallJSFunctionResultCaches();
+    if (!InstallNatives()) return;
 
     MakeFunctionInstancePrototypeWritable();
 

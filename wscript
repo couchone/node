@@ -7,13 +7,18 @@ from os.path import join, dirname, abspath
 from logging import fatal
 
 cwd = os.getcwd()
-VERSION="0.1.93"
 APPNAME="node.js"
 
 import js2c
 
 srcdir = '.'
 blddir = 'build'
+
+
+jobs=1
+if os.environ.has_key('JOBS'):
+  jobs = int(os.environ['JOBS'])
+
 
 def set_options(opt):
   # the gcc module provides a --debug-level option
@@ -32,78 +37,96 @@ def set_options(opt):
                 , help='Build with -lefence for debugging [Default: False]'
                 , dest='efence'
                 )
-  opt.add_option( '--system'
+
+  opt.add_option( '--without-snapshot'
                 , action='store_true'
                 , default=False
-                , help='Build using system libraries and headers (like a debian build) [Default: False]'
-                , dest='system'
+                , help='Build without snapshotting V8 libraries. You might want to set this for cross-compiling. [Default: False]'
+                , dest='without_snapshot'
                 )
 
-def mkdir_p(dir):
-  if not os.path.exists (dir):
-    os.makedirs (dir)
+  opt.add_option( '--without-ssl'
+                , action='store_true'
+                , default=False
+                , help='Build without SSL'
+                , dest='without_ssl'
+                )
 
-# Copied from Python 2.6 because 2.4.4 at least is broken by not using
-# mkdirs
-# http://mail.python.org/pipermail/python-bugs-list/2005-January/027118.html
-def copytree(src, dst, symlinks=False, ignore=None):
-    names = os.listdir(src)
-    if ignore is not None:
-        ignored_names = ignore(src, names)
-    else:
-        ignored_names = set()
 
-    os.makedirs(dst)
-    errors = []
-    for name in names:
-        if name in ignored_names:
-            continue
-        srcname = join(src, name)
-        dstname = join(dst, name)
-        try:
-            if symlinks and os.path.islink(srcname):
-                linkto = os.readlink(srcname)
-                os.symlink(linkto, dstname)
-            elif os.path.isdir(srcname):
-                copytree(srcname, dstname, symlinks, ignore)
-            else:
-                shutil.copy2(srcname, dstname)
-            # XXX What about devices, sockets etc.?
-        except (IOError, os.error), why:
-            errors.append((srcname, dstname, str(why)))
-        # catch the Error from the recursive copytree so that we can
-        # continue with other files
-        except Error, err:
-            errors.extend(err.args[0])
-    try:
-        shutil.copystat(src, dst)
-    except OSError, why:
-        if WindowsError is not None and isinstance(why, WindowsError):
-            # Copying file access times may fail on Windows
-            pass
-        else:
-            errors.extend((src, dst, str(why)))
-    if errors:
-        raise Error, errors
+  opt.add_option('--shared-v8'
+                , action='store_true'
+                , default=False
+                , help='Link to a shared V8 DLL instead of static linking'
+                , dest='shared_v8'
+                )
 
-def conf_subproject (conf, subdir, command=None):
-  print("---- %s ----" % subdir)
-  src = join(conf.srcdir, subdir)
-  if not os.path.exists (src): conf.fatal("no such subproject " + subdir)
+  opt.add_option( '--shared-v8-includes'
+                , action='store'
+                , default=False
+                , help='Directory containing V8 header files'
+                , dest='shared_v8_includes'
+                )
 
-  default_tgt = join(conf.blddir, "default", subdir)
+  opt.add_option( '--shared-v8-libpath'
+                , action='store'
+                , default=False
+                , help='A directory to search for the shared V8 DLL'
+                , dest='shared_v8_libpath'
+                )
 
-  if not os.path.exists(default_tgt):
-    copytree(src, default_tgt, True)
+  opt.add_option( '--shared-v8-libname'
+                , action='store'
+                , default=False
+                , help="Alternative lib name to link to (default: 'v8')"
+                , dest='shared_v8_libname'
+                )
 
-  if command:
-    if os.system("cd \"%s\" && %s" % (default_tgt, command)) != 0:
-      conf.fatal("Configuring %s failed." % (subdir))
 
-  debug_tgt = join(conf.blddir, "debug", subdir)
+  opt.add_option('--shared-cares'
+                , action='store_true'
+                , default=False
+                , help='Link to a shared C-Ares DLL instead of static linking'
+                , dest='shared_cares'
+                )
 
-  if not os.path.exists(debug_tgt):
-    copytree(default_tgt, debug_tgt, True)
+  opt.add_option( '--shared-cares-includes'
+                , action='store'
+                , default=False
+                , help='Directory containing C-Ares header files'
+                , dest='shared_cares_includes'
+                )
+
+  opt.add_option( '--shared-cares-libpath'
+                , action='store'
+                , default=False
+                , help='A directory to search for the shared C-Ares DLL'
+                , dest='shared_cares_libpath'
+                )
+
+
+  opt.add_option('--shared-libev'
+                , action='store_true'
+                , default=False
+                , help='Link to a shared libev DLL instead of static linking'
+                , dest='shared_libev'
+                )
+
+  opt.add_option( '--shared-libev-includes'
+                , action='store'
+                , default=False
+                , help='Directory containing libev header files'
+                , dest='shared_libev_includes'
+                )
+
+  opt.add_option( '--shared-libev-libpath'
+                , action='store'
+                , default=False
+                , help='A directory to search for the shared libev DLL'
+                , dest='shared_libev_libpath'
+                )
+
+
+
 
 def configure(conf):
   conf.check_tool('compiler_cxx')
@@ -111,11 +134,17 @@ def configure(conf):
   conf.check_tool('compiler_cc')
   if not conf.env.CC: conf.fatal('c compiler not found')
 
-  conf.env["USE_DEBUG"] = Options.options.debug
-  conf.env["USE_SYSTEM"] = Options.options.system
+  o = Options.options
+
+  conf.env["USE_DEBUG"] = o.debug
+  conf.env["SNAPSHOT_V8"] = not o.without_snapshot
+
+  conf.env["USE_SHARED_V8"] = o.shared_v8 or o.shared_v8_includes or o.shared_v8_libpath or o.shared_v8_libname
+  conf.env["USE_SHARED_CARES"] = o.shared_cares or o.shared_cares_includes or o.shared_cares_libpath
+  conf.env["USE_SHARED_LIBEV"] = o.shared_libev or o.shared_libev_includes or o.shared_libev_libpath
 
   conf.check(lib='dl', uselib_store='DL')
-  if not sys.platform.startswith("sunos"):
+  if not sys.platform.startswith("sunos") and not sys.platform.startswith("cygwin"):
     conf.env.append_value("CCFLAGS", "-rdynamic")
     conf.env.append_value("LINKFLAGS_DL", "-rdynamic")
 
@@ -128,29 +157,37 @@ def configure(conf):
   if Options.options.efence:
     conf.check(lib='efence', libpath=['/usr/lib', '/usr/local/lib'], uselib_store='EFENCE')
 
-  if not conf.check(lib="execinfo", includes=['/usr/include', '/usr/local/include'], libpath=['/usr/lib', '/usr/local/lib'], uselib_store="EXECINFO"):
-    # Note on Darwin/OS X: This will fail, but will still be used as the
-    # execinfo stuff are part of the standard library.
-    if sys.platform.startswith("freebsd"):
-      conf.fatal("Install the libexecinfo port from /usr/ports/devel/libexecinfo.")
+  if sys.platform.startswith("freebsd"):
+     if not conf.check(lib="execinfo",
+                       includes=['/usr/include', '/usr/local/include'],
+                       libpath=['/usr/lib', '/usr/local/lib'],
+                       uselib_store="EXECINFO"):
+       conf.fatal("Install the libexecinfo port from /usr/ports/devel/libexecinfo.")
 
-  if conf.check_cfg(package='openssl',
-                    args='--cflags --libs',
-                    uselib_store='OPENSSL'):
-    conf.env["USE_OPENSSL"] = True
-    conf.env.append_value("CXXFLAGS", "-DHAVE_OPENSSL=1")
+  if not Options.options.without_ssl:
+    if conf.check_cfg(package='openssl',
+                      args='--cflags --libs',
+                      uselib_store='OPENSSL'):
+      Options.options.use_openssl = conf.env["USE_OPENSSL"] = True
+      conf.env.append_value("CPPFLAGS", "-DHAVE_OPENSSL=1")
+    else:
+      libssl = conf.check_cc(lib='ssl',
+                             header_name='openssl/ssl.h',
+                             function_name='SSL_library_init',
+                             libpath=['/usr/lib', '/usr/local/lib', '/opt/local/lib', '/usr/sfw/lib'],
+                             uselib_store='OPENSSL')
+      libcrypto = conf.check_cc(lib='crypto',
+                                header_name='openssl/crypto.h',
+                                uselib_store='OPENSSL')
+      if libcrypto and libssl:
+        conf.env["USE_OPENSSL"] = Options.options.use_openssl = True
+        conf.env.append_value("CPPFLAGS", "-DHAVE_OPENSSL=1")
+      else:
+        conf.fatal("Could not autodetect OpenSSL support. " +
+                   "Make sure OpenSSL development packages are installed. " +
+                   "Use configure --without-ssl to disable this message.")
   else:
-    libssl = conf.check_cc(lib='ssl',
-                           header_name='openssl/ssl.h',
-                           function_name='SSL_library_init',
-                           libpath=['/usr/lib', '/usr/local/lib', '/opt/local/lib', '/usr/sfw/lib'],
-                           uselib_store='OPENSSL')
-    libcrypto = conf.check_cc(lib='crypto',
-                              header_name='openssl/crypto.h',
-                              uselib_store='OPENSSL')
-    if libcrypto and libssl:
-      conf.env["USE_OPENSSL"] = True
-      conf.env.append_value("CXXFLAGS", "-DHAVE_OPENSSL=1")
+    Options.options.use_openssl = conf.env["USE_OPENSSL"] = False
 
   conf.check(lib='rt', uselib_store='RT')
 
@@ -161,16 +198,58 @@ def configure(conf):
       conf.fatal("Cannot find nsl library")
 
   conf.sub_config('deps/libeio')
-  if not Options.options.system:
-    conf.sub_config('deps/libev')
-    conf.sub_config('deps/c-ares')
-  else:
-    if not conf.check(lib='v8', uselib_store='V8'):
-      conf.fatal("Cannot find V8")
-    if not conf.check(lib='ev', uselib_store='EV'):
-      conf.fatal("Cannot find libev")
-    if not conf.check(lib='cares', uselib_store='CARES'):
+
+  if conf.env['USE_SHARED_V8']:
+    v8_includes = [];
+    if o.shared_v8_includes: v8_includes.append(o.shared_v8_includes);
+
+    v8_libpath = [];
+    if o.shared_v8_libpath: v8_libpath.append(o.shared_v8_libpath);
+
+    if not o.shared_v8_libname: o.shared_v8_libname = 'v8'
+
+    if not conf.check_cxx(lib=o.shared_v8_libname, header_name='v8.h',
+                          uselib_store='V8',
+                          includes=v8_includes,
+                          libpath=v8_libpath):
+      conf.fatal("Cannot find v8")
+
+    if o.debug:
+      if not conf.check_cxx(lib=o.shared_v8_libname + '_g', header_name='v8.h',
+                            uselib_store='V8_G',
+                            includes=v8_includes,
+                            libpath=v8_libpath):
+        conf.fatal("Cannot find v8_g")
+
+  if conf.env['USE_SHARED_CARES']:
+    cares_includes = [];
+    if o.shared_cares_includes: cares_includes.append(o.shared_cares_includes);
+    cares_libpath = [];
+    if o.shared_cares_libpath: cares_libpath.append(o.shared_cares_libpath);
+    if not conf.check_cxx(lib='cares',
+                          header_name='ares.h',
+                          uselib_store='CARES',
+                          includes=cares_includes,
+                          libpath=cares_libpath):
       conf.fatal("Cannot find c-ares")
+  else:
+    conf.sub_config('deps/c-ares')
+
+
+  if conf.env['USE_SHARED_LIBEV']:
+    libev_includes = [];
+    if o.shared_libev_includes: libev_includes.append(o.shared_libev_includes);
+    libev_libpath = [];
+    if o.shared_libev_libpath: libev_libpath.append(o.shared_libev_libpath);
+    if not conf.check_cxx(lib='ev', header_name='ev.h',
+                          uselib_store='EV',
+                          includes=libev_includes,
+                          libpath=libev_libpath):
+      conf.fatal("Cannot find libev")
+  else:
+    conf.sub_config('deps/libev')
+
+
 
   conf.define("HAVE_CONFIG_H", 1)
 
@@ -178,24 +257,39 @@ def configure(conf):
     conf.env.append_value ('CCFLAGS', '-threads')
     conf.env.append_value ('CXXFLAGS', '-threads')
     #conf.env.append_value ('LINKFLAGS', ' -threads')
-  else:
+  elif not sys.platform.startswith("cygwin"):
     threadflags='-pthread'
     conf.env.append_value ('CCFLAGS', threadflags)
     conf.env.append_value ('CXXFLAGS', threadflags)
     conf.env.append_value ('LINKFLAGS', threadflags)
+  if sys.platform.startswith("darwin"):
+    # used by platform_darwin_*.cc
+    conf.env.append_value('LINKFLAGS', ['-framework','Carbon'])
 
-  conf.env.append_value("CCFLAGS", "-DX_STACKSIZE=%d" % (1024*64))
-
+  # Needed for getaddrinfo in libeio
+  conf.env.append_value("CPPFLAGS", "-DX_STACKSIZE=%d" % (1024*64))
   # LFS
-  conf.env.append_value('CCFLAGS',  '-D_LARGEFILE_SOURCE')
-  conf.env.append_value('CXXFLAGS', '-D_LARGEFILE_SOURCE')
-  conf.env.append_value('CCFLAGS',  '-D_FILE_OFFSET_BITS=64')
-  conf.env.append_value('CXXFLAGS', '-D_FILE_OFFSET_BITS=64')
+  conf.env.append_value('CPPFLAGS',  '-D_LARGEFILE_SOURCE')
+  conf.env.append_value('CPPFLAGS',  '-D_FILE_OFFSET_BITS=64')
+
+  ## needed for node_file.cc fdatasync
+  ## Strangely on OSX 10.6 the g++ doesn't see fdatasync but gcc does?
+  code =  """
+    #include <unistd.h>
+    int main(void)
+    {
+       int fd = 0;
+       fdatasync (fd);
+       return 0;
+    }
+  """
+  if conf.check_cxx(msg="Checking for fdatasync(2) with c++", fragment=code):
+    conf.env.append_value('CPPFLAGS', '-DHAVE_FDATASYNC=1')
+  else:
+    conf.env.append_value('CPPFLAGS', '-DHAVE_FDATASYNC=0')
 
   # platform
-  platform_def = '-DPLATFORM=' + sys.platform
-  conf.env.append_value('CCFLAGS', platform_def)
-  conf.env.append_value('CXXFLAGS', platform_def)
+  conf.env.append_value('CPPFLAGS', '-DPLATFORM="' + conf.env['DEST_OS'] + '"')
 
   # Split off debug variant before adding variant specific defines
   debug_env = conf.env.copy()
@@ -204,14 +298,18 @@ def configure(conf):
   # Configure debug variant
   conf.setenv('debug')
   debug_env.set_variant('debug')
-  debug_env.append_value('CCFLAGS', ['-DDEBUG', '-g', '-O0', '-Wall', '-Wextra'])
-  debug_env.append_value('CXXFLAGS', ['-DDEBUG', '-g', '-O0', '-Wall', '-Wextra'])
+  debug_env.append_value('CPPFLAGS', '-DDEBUG')
+  debug_compile_flags = ['-g', '-O0', '-Wall', '-Wextra']
+  debug_env.append_value('CCFLAGS', debug_compile_flags)
+  debug_env.append_value('CXXFLAGS', debug_compile_flags)
   conf.write_config_header("config.h")
 
   # Configure default variant
   conf.setenv('default')
-  conf.env.append_value('CCFLAGS', ['-DNDEBUG', '-O3'])
-  conf.env.append_value('CXXFLAGS', ['-DNDEBUG', '-O3'])
+  conf.env.append_value('CPPFLAGS', '-DNDEBUG')
+  default_compile_flags = ['-g', '-O3']
+  conf.env.append_value('CCFLAGS', default_compile_flags)
+  conf.env.append_value('CXXFLAGS', default_compile_flags)
   conf.write_config_header("config.h")
 
 
@@ -235,27 +333,34 @@ def v8_cmd(bld, variant):
   else:
     mode = "debug"
 
-  cmd_R = 'python "%s" -C "%s" -Y "%s" visibility=default mode=%s %s library=static snapshot=on'
+  if bld.env["SNAPSHOT_V8"]:
+    snapshot = "snapshot=on"
+  else:
+    snapshot = ""
+
+  cmd_R = 'python "%s" -j %d -C "%s" -Y "%s" visibility=default mode=%s %s library=static %s'
 
   cmd = cmd_R % ( scons
+                , Options.options.jobs
                 , bld.srcnode.abspath(bld.env_of_name(variant))
                 , v8dir_src
                 , mode
                 , arch
+                , snapshot
                 )
-  return cmd
+  
+  return ("echo '%s' && " % cmd) + cmd
 
 
 def build_v8(bld):
   v8 = bld.new_task_gen(
-    source        = 'deps/v8/SConstruct ' 
-                  + bld.path.ant_glob('v8/include/*') 
-                  + bld.path.ant_glob('v8/src/*'),
+    source        = 'deps/v8/SConstruct '
+                    + bld.path.ant_glob('v8/include/*')
+                    + bld.path.ant_glob('v8/src/*'),
     target        = bld.env["staticlib_PATTERN"] % "v8",
     rule          = v8_cmd(bld, "default"),
     before        = "cxx",
-    install_path  = None
-  )
+    install_path  = None)
   v8.uselib = "EXECINFO"
   bld.env["CPPPATH_V8"] = "deps/v8/include"
   t = join(bld.srcnode.abspath(bld.env_of_name("default")), v8.target)
@@ -268,20 +373,33 @@ def build_v8(bld):
     v8_debug.rule   = v8_cmd(bld, "debug")
     v8_debug.target = bld.env["staticlib_PATTERN"] % "v8_g"
     v8_debug.uselib = "EXECINFO"
+    bld.env["CPPPATH_V8_G"] = "deps/v8/include"
     t = join(bld.srcnode.abspath(bld.env_of_name("debug")), v8_debug.target)
-    bld.env_of_name('debug').append_value("LINKFLAGS_V8", t)
+    bld.env_of_name('debug').append_value("LINKFLAGS_V8_G", t)
 
   bld.install_files('${PREFIX}/include/node/', 'deps/v8/include/*.h')
 
+
 def build(bld):
+  ## This snippet is to show full commands as WAF executes
+  import Build
+  old = Build.BuildContext.exec_command
+  def exec_command(self, cmd, **kw):
+    if isinstance(cmd, list): print(" ".join(cmd))
+    return old(self, cmd, **kw)
+  Build.BuildContext.exec_command = exec_command
+
+  Options.options.jobs=jobs
+
   print "DEST_OS: " + bld.env['DEST_OS']
   print "DEST_CPU: " + bld.env['DEST_CPU']
+  print "Parallel Jobs: " + str(Options.options.jobs)
 
-  if not bld.env["USE_SYSTEM"]:
-    bld.add_subdirs('deps/libeio deps/libev deps/c-ares')
-    build_v8(bld)
-  else:
-    bld.add_subdirs('deps/libeio')
+  bld.add_subdirs('deps/libeio')
+
+  if not bld.env['USE_SHARED_V8']: build_v8(bld)
+  if not bld.env['USE_SHARED_LIBEV']: bld.add_subdirs('deps/libev')
+  if not bld.env['USE_SHARED_CARES']: bld.add_subdirs('deps/c-ares')
 
 
   ### http_parser
@@ -349,11 +467,17 @@ def build(bld):
   node = bld.new_task_gen("cxx", "program")
   node.name         = "node"
   node.target       = "node"
+  node.uselib = 'RT EV OPENSSL CARES EXECINFO DL KVM SOCKET NSL'
+  node.add_objects = 'eio http_parser'
+  node.install_path = '${PREFIX}/lib'
+  node.install_path = '${PREFIX}/bin'
+  node.chmod = 0755
   node.source = """
     src/node.cc
     src/node_buffer.cc
+    src/node_extensions.cc
     src/node_http_parser.cc
-    src/node_net2.cc
+    src/node_net.cc
     src/node_io_watcher.cc
     src/node_child_process.cc
     src/node_constants.cc
@@ -366,85 +490,81 @@ def build(bld):
     src/node_timer.cc
     src/node_script.cc
   """
-  if bld.env["USE_OPENSSL"]:
-    node.source += "src/node_crypto.cc"
 
-  if not bld.env["USE_SYSTEM"]:
-    node.includes = """
-      src/ 
-      deps/v8/include
-      deps/libev
-      deps/c-ares
-      deps/libeio
-      deps/http_parser
-    """
-
-    node.includes += ' deps/c-ares/' + bld.env['DEST_OS'] + '-' + bld.env['DEST_CPU']
-
-
-    node.add_objects = 'cares ev eio http_parser'
-    node.uselib_local = ''
-    node.uselib = 'RT OPENSSL V8 EXECINFO DL KVM SOCKET NSL'
+  platform_file = "src/platform_%s.cc" % bld.env['DEST_OS']
+  if os.path.exists(join(cwd, platform_file)):
+    node.source += platform_file
   else:
-    node.includes = """
-      src/
-      deps/libeio
-      deps/http_parser
-    """
-    node.add_objects = 'eio http_parser'
-    node.uselib_local = 'eio'
-    node.uselib = 'RT EV OPENSSL CARES V8 EXECINFO DL KVM SOCKET NSL'
+    node.source += "src/platform_none.cc "
 
-  node.install_path = '${PREFIX}/lib'
-  node.install_path = '${PREFIX}/bin'
-  node.chmod = 0755
+
+  if bld.env["USE_OPENSSL"]: node.source += " src/node_crypto.cc "
+
+  node.includes = """
+    src/
+    deps/libeio
+    deps/http_parser
+  """
+
+  if not bld.env["USE_SHARED_V8"]: node.includes += ' deps/v8/include '
+
+  if not bld.env["USE_SHARED_LIBEV"]:
+    node.add_objects += ' ev '
+    node.includes += ' deps/libev '
+
+  if not bld.env["USE_SHARED_CARES"]:
+    node.add_objects += ' cares '
+    node.includes += '  deps/c-ares deps/c-ares/' + bld.env['DEST_OS'] + '-' + bld.env['DEST_CPU']
+
+  if sys.platform.startswith('cygwin'):
+    bld.env.append_value('LINKFLAGS', '-Wl,--export-all-symbols')
+    bld.env.append_value('LINKFLAGS', '-Wl,--out-implib,default/libnode.dll.a')
+    bld.env.append_value('LINKFLAGS', '-Wl,--output-def,default/libnode.def')
+    bld.install_files('${PREFIX}/lib', "build/default/libnode.*")
 
   def subflags(program):
-    if os.path.exists(join(cwd, ".git")):
-      actual_version=cmd_output("git describe").strip()
-    else:
-      actual_version=VERSION
-
-    x = { 'CCFLAGS'   : " ".join(program.env["CCFLAGS"])
-        , 'CPPFLAGS'  : " ".join(program.env["CPPFLAGS"])
-        , 'LIBFLAGS'  : " ".join(program.env["LIBFLAGS"])
-        , 'VERSION'   : actual_version
+    x = { 'CCFLAGS'   : " ".join(program.env["CCFLAGS"]).replace('"', '\\"')
+        , 'CPPFLAGS'  : " ".join(program.env["CPPFLAGS"]).replace('"', '\\"')
+        , 'LIBFLAGS'  : " ".join(program.env["LIBFLAGS"]).replace('"', '\\"')
         , 'PREFIX'    : program.env["PREFIX"]
         }
     return x
 
   # process file.pc.in -> file.pc
 
-  node_version = bld.new_task_gen('subst', before="cxx")
-  node_version.source = 'src/node_version.h.in'
-  node_version.target = 'src/node_version.h'
-  node_version.dict = subflags(node)
-  node_version.install_path = '${PREFIX}/include/node'
+  node_conf = bld.new_task_gen('subst', before="cxx")
+  node_conf.source = 'src/node_config.h.in'
+  node_conf.target = 'src/node_config.h'
+  node_conf.dict = subflags(node)
+  node_conf.install_path = '${PREFIX}/include/node'
 
   if bld.env["USE_DEBUG"]:
     node_g = node.clone("debug")
     node_g.target = "node_g"
-    
-    node_version_g = node_version.clone("debug")
-    node_version_g.dict = subflags(node_g)
-    node_version_g.install_path = None
+    node_g.uselib += ' V8_G'
 
+    node_conf_g = node_conf.clone("debug")
+    node_conf_g.dict = subflags(node_g)
+    node_conf_g.install_path = None
+
+  # After creating the debug clone, append the V8 dep
+  node.uselib += ' V8'
 
   bld.install_files('${PREFIX}/include/node/', """
     config.h
     src/node.h
     src/node_object_wrap.h
+    src/node_buffer.h
     src/node_events.h
+    src/node_version.h
   """)
 
-  # Only install the man page if it exists. 
+  # Only install the man page if it exists.
   # Do 'make doc install' to build and install it.
   if os.path.exists('doc/node.1'):
     bld.install_files('${PREFIX}/share/man/man1/', 'doc/node.1')
 
   bld.install_files('${PREFIX}/bin/', 'bin/*', chmod=0755)
-
-  # Why am I using two lines? Because WAF SUCKS.
   bld.install_files('${PREFIX}/lib/node/wafadmin', 'tools/wafadmin/*.py')
   bld.install_files('${PREFIX}/lib/node/wafadmin/Tools', 'tools/wafadmin/Tools/*.py')
 
@@ -452,7 +572,11 @@ def shutdown():
   Options.options.debug
   # HACK to get binding.node out of build directory.
   # better way to do this?
-  if not Options.commands['clean']:
+  if Options.commands['configure']:
+    if not Options.options.use_openssl:
+      print "WARNING WARNING WARNING"
+      print "OpenSSL not found. Will compile Node without crypto support!"
+  elif not Options.commands['clean']:
     if os.path.exists('build/default/node') and not os.path.exists('node'):
       os.symlink('build/default/node', 'node')
     if os.path.exists('build/debug/node_g') and not os.path.exists('node_g'):

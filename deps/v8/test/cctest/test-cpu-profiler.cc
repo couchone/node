@@ -12,10 +12,12 @@ namespace i = v8::internal;
 
 using i::CodeEntry;
 using i::CpuProfile;
+using i::CpuProfiler;
 using i::CpuProfilesCollection;
 using i::ProfileGenerator;
 using i::ProfileNode;
 using i::ProfilerEventsProcessor;
+using i::TokenEnumerator;
 
 
 TEST(StartStop) {
@@ -114,7 +116,8 @@ TEST(CodeEvents) {
   processor.CodeMoveEvent(ToAddress(0x1400), ToAddress(0x1500));
   processor.CodeCreateEvent(i::Logger::STUB_TAG, 3, ToAddress(0x1600), 0x10);
   processor.CodeDeleteEvent(ToAddress(0x1600));
-  processor.FunctionCreateEvent(ToAddress(0x1700), ToAddress(0x1000));
+  processor.FunctionCreateEvent(ToAddress(0x1700), ToAddress(0x1000),
+                                TokenEnumerator::kNoSecurityToken);
   // Enqueue a tick event to enable code events processing.
   EnqueueTickSampleEvent(&processor, ToAddress(0x1000));
 
@@ -176,7 +179,8 @@ TEST(TickEvents) {
 
   processor.Stop();
   processor.Join();
-  CpuProfile* profile = profiles.StopProfiling("", 1);
+  CpuProfile* profile =
+      profiles.StopProfiling(TokenEnumerator::kNoSecurityToken, "", 1);
   CHECK_NE(NULL, profile);
 
   // Check call trees.
@@ -220,6 +224,20 @@ TEST(TickEvents) {
       bottom_up_ddd_children->last()->children();
   CHECK_EQ(1, bottom_up_ddd_stub_children->length());
   CHECK_EQ("bbb", bottom_up_ddd_stub_children->last()->entry()->name());
+}
+
+
+// http://crbug/51594
+// This test must not crash.
+TEST(CrashIfStoppingLastNonExistentProfile) {
+  InitializeVM();
+  TestSetup test_setup;
+  CpuProfiler::Setup();
+  CpuProfiler::StartProfiling("1");
+  CpuProfiler::StopProfiling("2");
+  CpuProfiler::StartProfiling("1");
+  CpuProfiler::StopProfiling("");
+  CpuProfiler::TearDown();
 }
 
 #endif  // ENABLE_LOGGING_AND_PROFILING
